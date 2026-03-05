@@ -27,6 +27,8 @@ python3 standalone/run_scouting_tnp_compare.py \
 - Fill `data_baseline` and `data_custom` in `standalone/datasets.yaml` before running data comparison.
 - Electron ID is imported from your shared project file: `electron_id.py`.
 - The script prints timestamped progress in shell (DAS query, sample start/end, output writes, plot generation).
+- For private/user datasets, use DAS dataset names (`/.../USER`) and set `das_instance: prod/phys03`; these are not filesystem paths.
+- If `dataset` is a `root://...` directory (or `/store/...`), file listing is done with `xrdfs ... ls` instead of `dasgoclient`.
 - If you already have explicit ROOT files in YAML, you can skip DAS lookup:
 ```bash
 python3 standalone/run_scouting_tnp_compare.py \

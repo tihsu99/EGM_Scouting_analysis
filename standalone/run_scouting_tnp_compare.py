@@ -69,16 +69,50 @@ def prepend_redirector(path: str, redirector: str) -> str:
     return redirector_norm + path
 
 
-def query_das_files(dataset: str) -> List[str]:
-    log(f"Query DAS for dataset: {dataset}")
-    cmd = ["dasgoclient", "-query", f"file dataset={dataset}"]
+def split_xrootd_url(xrootd_url: str) -> Tuple[str, str]:
+    if not xrootd_url.startswith("root://"):
+        raise ValueError(f"Not an xrootd URL: {xrootd_url}")
+    remainder = xrootd_url[len("root://") :]
+    host, sep, raw_path = remainder.partition("/")
+    if not sep or not host:
+        raise ValueError(f"Invalid xrootd URL: {xrootd_url}")
+    path = "/" + raw_path.lstrip("/")
+    return host, path
+
+
+def query_xrootd_files(xrootd_dir: str) -> List[str]:
+    host, directory = split_xrootd_url(xrootd_dir)
+    log(f"List XRootD directory: {xrootd_dir}")
+    cmd = ["xrdfs", host, "ls", directory]
+    proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    entries = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+    files: List[str] = []
+    for entry in entries:
+        if not entry.endswith(".root"):
+            continue
+        if entry.startswith("root://"):
+            files.append(entry)
+        elif entry.startswith("/"):
+            files.append(f"root://{host}//{entry.lstrip('/')}")
+        else:
+            files.append(f"root://{host}//{directory.rstrip('/')}/{entry.lstrip('./')}")
+    log(f"XRootD returned {len(files)} ROOT files for directory: {xrootd_dir}")
+    return files
+
+
+def query_das_files(dataset: str, das_instance: str) -> List[str]:
+    log(f"Query DAS for dataset: {dataset} (instance={das_instance})")
+    cmd = ["dasgoclient", "-query", f"file dataset={dataset} instance={das_instance}"]
     proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
     files = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
     log(f"DAS returned {len(files)} files for dataset: {dataset}")
     return files
 
 
-def resolve_sample_files(sample_cfg: Dict, redirector: str, max_files: int | None, skip_das: bool) -> List[str]:
+def resolve_sample_files(
+    sample_cfg: Dict, redirector: str, max_files: int | None, skip_das: bool, das_instance: str
+) -> List[str]:
     files: List[str] = []
 
     for item in sample_cfg.get("files", []) or []:
@@ -86,10 +120,16 @@ def resolve_sample_files(sample_cfg: Dict, redirector: str, max_files: int | Non
 
     dataset = (sample_cfg.get("dataset") or "").strip()
     if dataset and not files:
-        if skip_das:
-            raise RuntimeError(f"DAS lookup disabled but sample has only dataset entry: {dataset}")
-        das_files = query_das_files(dataset)
-        files.extend(prepend_redirector(f, redirector) for f in das_files)
+        if dataset.startswith("root://"):
+            files.extend(query_xrootd_files(dataset))
+        elif dataset.startswith("/store/"):
+            xrd_dir = prepend_redirector(dataset, redirector)
+            files.extend(query_xrootd_files(xrd_dir))
+        else:
+            if skip_das:
+                raise RuntimeError(f"DAS lookup disabled but sample has only dataset entry: {dataset}")
+            das_files = query_das_files(dataset, das_instance)
+            files.extend(prepend_redirector(f, redirector) for f in das_files)
 
     deduped = list(dict.fromkeys(files))
     if max_files is not None:
@@ -520,9 +560,13 @@ def main() -> None:
     log(f"Output directory: {output_dir}")
 
     redirector = cfg.get("redirector", "")
+    das_instance = cfg.get("das_instance", "prod/global")
     max_files = args.max_files if args.max_files is not None else cfg.get("max_files_per_sample")
     total_samples = len(cfg.get("samples", {}))
-    log(f"Configured samples: {total_samples}, max_files_per_sample={max_files}, skip_das={args.skip_das}")
+    log(
+        f"Configured samples: {total_samples}, max_files_per_sample={max_files}, "
+        f"skip_das={args.skip_das}, das_instance={das_instance}"
+    )
 
     processed_samples: Dict[str, Dict] = {}
     summary: Dict[str, Dict] = {}
@@ -530,7 +574,7 @@ def main() -> None:
     for idx, (sample_name, sample_cfg) in enumerate(cfg.get("samples", {}).items(), start=1):
         log(f"[{idx}/{total_samples}] Prepare sample: {sample_name}")
         try:
-            files = resolve_sample_files(sample_cfg, redirector, max_files, skip_das=args.skip_das)
+            files = resolve_sample_files(sample_cfg, redirector, max_files, skip_das=args.skip_das, das_instance=das_instance)
         except Exception as exc:
             log(f"[{sample_name}] File resolution failed: {exc}")
             summary[sample_name] = {

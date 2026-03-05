@@ -1,4 +1,5 @@
 redirector: root://xrootd-cms.infn.it//
+das_instance: prod/phys03
 tree_name: Events
 max_files_per_sample: null
 
@@ -45,9 +46,9 @@ samples:
   data_baseline:
     kind: data
     variant: baseline
-    dataset: "/EphemeralHLTPhysics0/ppradeep-GRun_16_0_0_V30_baseline_ScoutingNano-00000000000000000000000000000000/USER"
+    dataset: /EphemeralHLTPhysics0/ppradeep-GRun_16_0_0_V30_baseline_ScoutingNano-00000000000000000000000000000000/USER
 
   data_custom:
     kind: data
     variant: custom
-    dataset: "/EphemeralHLTPhysics0/ppradeep-GRun_16_0_0_V30_customise_case1_ScoutingNano-00000000000000000000000000000000/USER"
+    dataset: /EphemeralHLTPhysics0/ppradeep-GRun_16_0_0_V30_customise_case1_ScoutingNano-00000000000000000000000000000000/USER
