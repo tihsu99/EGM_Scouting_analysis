@@ -13,7 +13,7 @@ def get_ea(abs_eta):
                  0.1003)))))))
 
 
-def electron_id_mask(electrons,rho, working_point="Loose"):
+def electron_id_mask(electrons,rho, working_point="Loose", use_iso=True):
     """
     Apply 122X-tuned ID cuts to electrons in an awkward array.
     
@@ -110,6 +110,8 @@ def electron_id_mask(electrons,rho, working_point="Loose"):
     
     neutral_iso = electrons.ecalIso + electrons.hcalIso - rho*effective_area
     iso = (ak.where(neutral_iso > 0, neutral_iso, 0) + electrons.trackIso) / pt
+    iso = iso if use_iso else ak.zeros_like(iso)
+
     ooEmooP = abs(electrons.ooEMOop)
     missingHits = electrons.missingHits
     convVeto = True  # Placeholder: assume it’s a flag you will fill externally

@@ -24,7 +24,6 @@ class ElectronInvariantMassProcessor(processor.ProcessorABC):
           "PFScouting_DoubleEG": [],
           "PFScouting_SingleMuon": [],
           "PFScouting_JetHT": [],
-          "PFScouting_DoubleMuon": [],
           "PFScouting_ZeroBias": [],
           "PFScouting_SinglePhotonEB": []
         }
@@ -191,8 +190,8 @@ if __name__ == "__main__":
 #    filename = "root://cms-xrd-global.cern.ch///store/user/asahasra/ScoutingPFRun3/Scouting_2024F_crabNano250527_DiElSkim/250527_081921/0000/scouting_nano_100.root"
 
     tag_selection = {
-        "pt-min": 5,
-        "abseta-max": 2.5,
+        "pt-min": 20,
+        "abseta-max": 1.47,
         "id": "Veto-noiso_id"
     }
 
