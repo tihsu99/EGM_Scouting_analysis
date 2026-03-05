@@ -11,3 +11,15 @@ fi
 
 #source /cvmfs/sft.cern.ch/lcg/views/LCG_102b/x86_64-centos9-gcc11-opt/setup.sh
 #source /cvmfs/sft.cern.ch/lcg/views/LCG_103/x86_64-centos7-gcc11-opt/setup.sh
+
+# Keep CMS client tools (dasgoclient, voms, etc.) available after LCG setup.
+if [ -f /cvmfs/cms.cern.ch/cmsset_default.sh ]; then
+  source /cvmfs/cms.cern.ch/cmsset_default.sh
+fi
+if [ -d /cvmfs/cms.cern.ch/common ]; then
+  export PATH="/cvmfs/cms.cern.ch/common:${PATH}"
+fi
+
+if ! command -v dasgoclient >/dev/null 2>&1; then
+  echo "[env.sh] WARNING: dasgoclient not found in PATH after setup."
+fi
