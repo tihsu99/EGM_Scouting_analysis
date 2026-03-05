@@ -1,0 +1,53 @@
+redirector: root://xrootd-cms.infn.it//
+tree_name: Events
+max_files_per_sample: null
+
+runner:
+  workers: 8
+  chunksize: 300000
+  maxchunks: null
+  show_progress: true
+
+selection:
+  electron_pt_min: 5.0
+  electron_abs_eta_max: 2.5
+  tag_pt_min: 20.0
+  tag_abs_eta_max: 1.47
+  tag_id: Tight-noiso
+  probe_pre_id: Veto-noiso
+  mass_window: [70.0, 110.0]
+  require_opposite_charge: true
+
+tnp:
+  pt_bins: [5, 8, 10, 13, 17, 20, 25, 30, 35, 40, 50, 80, 100, 120, 300]
+  eta_bins:
+    - [0.0, 1.5]
+  target_triggers:
+    - PFScouting_DoubleEG
+    - PFScouting_SinglePhotonEB
+
+samples:
+  mc_baseline:
+    kind: mc
+    variant: baseline
+    dataset: /TTToLNu2Q_TuneCP5_13p6TeV_powheg-pythia8/ppradeep-GRun_16_0_0_V30_baseline_ScoutingNano-00000000000000000000000000000000/USER
+
+  mc_custom:
+    kind: mc
+    variant: custom
+    dataset: /TTToLNu2Q_TuneCP5_13p6TeV_powheg-pythia8/ppradeep-GRun_16_0_0_V30_customise_case1_ScoutingNano-00000000000000000000000000000000/USER
+
+  # Fill these with your data datasets when ready.
+  # Optionally, instead of "dataset", provide explicit ROOT files using:
+  # files:
+  #   - /store/...
+  #   - root://.../store/...
+  data_baseline:
+    kind: data
+    variant: baseline
+    dataset: ""
+
+  data_custom:
+    kind: data
+    variant: custom
+    dataset: ""
