@@ -71,10 +71,10 @@ DIELECTRON_VARIABLE_SPECS = {
         "bins": (128, -3.2, 3.2),
         "xlabel": "Subleading bestTrack #phi_{mode}",
     },
-    "lead_bestTrack_d0": {"source": "lead_bestTrack_d0", "bins": (120, -0.06, 0.06), "xlabel": "Leading bestTrack d_{0} [cm]"},
+    "lead_bestTrack_d0": {"source": "lead_bestTrack_d0", "bins": (200, -0.2, 0.2), "xlabel": "Leading bestTrack d_{0} [cm]"},
     "sublead_bestTrack_d0": {
         "source": "sublead_bestTrack_d0",
-        "bins": (120, -0.06, 0.06),
+        "bins": (200, -0.2, 0.2),
         "xlabel": "Subleading bestTrack d_{0} [cm]",
     },
     "lead_bestTrack_dz": {"source": "lead_bestTrack_dz", "bins": (120, -0.30, 0.30), "xlabel": "Leading bestTrack d_{z} [cm]"},
@@ -107,7 +107,7 @@ SINGLE_ELECTRON_VARIABLE_SPECS = {
         "bins": (128, -3.2, 3.2),
         "xlabel": "Electron bestTrack #phi_{mode}",
     },
-    "single_bestTrack_d0": {"source": "single_bestTrack_d0", "bins": (120, -0.06, 0.06), "xlabel": "Electron bestTrack d_{0} [cm]"},
+    "single_bestTrack_d0": {"source": "single_bestTrack_d0", "bins": (200, -0.2, 0.2), "xlabel": "Electron bestTrack d_{0} [cm]"},
     "single_bestTrack_dz": {"source": "single_bestTrack_dz", "bins": (120, -0.30, 0.30), "xlabel": "Electron bestTrack d_{z} [cm]"},
     "single_bestTrack_chi2overndf": {
         "source": "single_bestTrack_chi2overndf",
@@ -292,10 +292,10 @@ class DielectronProcessor(processor.ProcessorABC):
         phi_mode = self._field_or(electrons, "bestTrack_phiMode", "bestTrack_phi")
         electrons["p4"] = ak.zip(
             {
-                "pt": electrons.bestTrack_pt,
+                "pt": electrons.pt,
                 "eta": eta_mode,
                 "phi": phi_mode,
-                "mass": ak.ones_like(electrons.bestTrack_pt) * ELECTRON_MASS_GEV,
+                "mass": ak.ones_like(electrons.pt) * ELECTRON_MASS_GEV,
             },
             with_name="Momentum4D",
         )
@@ -315,8 +315,8 @@ class DielectronProcessor(processor.ProcessorABC):
                 single = electrons_single[:, 0]
                 single_var_map = {
                     "single_bestTrack_pt": single.bestTrack_pt,
-                    "single_bestTrack_etaMode": self._field_or(single, "bestTrack_etaMode", "bestTrack_eta"),
-                    "single_bestTrack_phiMode": self._field_or(single, "bestTrack_phiMode", "bestTrack_phi"),
+                    "single_bestTrack_etaMode": single.bestTrack_etaMode,
+                    "single_bestTrack_phiMode": single.bestTrack_phiMode,
                     "single_bestTrack_d0": single.bestTrack_d0,
                     "single_bestTrack_dz": single.bestTrack_dz,
                     "single_bestTrack_chi2overndf": single.bestTrack_chi2overndf,
@@ -346,10 +346,10 @@ class DielectronProcessor(processor.ProcessorABC):
                 "mass": mass,
                 "lead_bestTrack_pt": lead.bestTrack_pt,
                 "sublead_bestTrack_pt": sublead.bestTrack_pt,
-                "lead_bestTrack_etaMode": self._field_or(lead, "bestTrack_etaMode", "bestTrack_eta"),
-                "sublead_bestTrack_etaMode": self._field_or(sublead, "bestTrack_etaMode", "bestTrack_eta"),
-                "lead_bestTrack_phiMode": self._field_or(lead, "bestTrack_phiMode", "bestTrack_phi"),
-                "sublead_bestTrack_phiMode": self._field_or(sublead, "bestTrack_phiMode", "bestTrack_phi"),
+                "lead_bestTrack_etaMode": lead.bestTrack_etaMode,
+                "sublead_bestTrack_etaMode": sublead.bestTrack_etaMode,
+                "lead_bestTrack_phiMode": lead.bestTrack_phiMode,
+                "sublead_bestTrack_phiMode": sublead.bestTrack_phiMode,
                 "lead_bestTrack_d0": lead.bestTrack_d0,
                 "sublead_bestTrack_d0": sublead.bestTrack_d0,
                 "lead_bestTrack_dz": lead.bestTrack_dz,
@@ -446,22 +446,22 @@ def build_hist(name: str, values: np.ndarray, bins: Tuple[int, float, float]) ->
 
 def ratio_hist(numerator: ROOT.TH1F, denominator: ROOT.TH1F, name: str) -> ROOT.TH1F:
     ratio = numerator.Clone(name)
-    ratio.Reset("ICESM")
-    for ibin in range(1, numerator.GetNbinsX() + 1):
-        n = numerator.GetBinContent(ibin)
-        d = denominator.GetBinContent(ibin)
-        en = numerator.GetBinError(ibin)
-        ed = denominator.GetBinError(ibin)
-        if d <= 0:
-            ratio.SetBinContent(ibin, 0.0)
-            ratio.SetBinError(ibin, 0.0)
-            continue
-        r = n / d
-        rel_n = (en / n) if n > 0 else 0.0
-        rel_d = ed / d
-        er = r * np.sqrt(rel_n * rel_n + rel_d * rel_d)
-        ratio.SetBinContent(ibin, r)
-        ratio.SetBinError(ibin, er)
+    ratio.Divide(denominator)
+    # for ibin in range(1, numerator.GetNbinsX() + 1):
+    #     n = numerator.GetBinContent(ibin)
+    #     d = denominator.GetBinContent(ibin)
+    #     en = numerator.GetBinError(ibin)
+    #     ed = denominator.GetBinError(ibin)
+    #     if d <= 0:
+    #         ratio.SetBinContent(ibin, 0.0)
+    #         ratio.SetBinError(ibin, 0.0)
+    #         continue
+    #     r = n / d
+    #     rel_n = (en / n) if n > 0 else 0.0
+    #     rel_d = ed / d
+    #     er = r * np.sqrt(rel_n * rel_n + rel_d * rel_d)
+    #     ratio.SetBinContent(ibin, r)
+    #     ratio.SetBinError(ibin, er)
     return ratio
 
 
