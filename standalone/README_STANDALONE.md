@@ -47,9 +47,9 @@ python3 standalone/run_diele_cmsstyle_compare.py \
 - The script prints timestamped progress in shell (DAS query, sample start/end, output writes, plot generation).
 - Stage-1 cached arrays are written to `standalone/output/stage1_arrays/` by default (`--stage1-dir` to override).
 - Ratio panel range is tunable with `--ratio-min/--ratio-max` (defaults: `0.9` and `1.1`).
-- Plots are written under:
-  - `standalone/output/plots/<trigger_tag>/dielectron/...`
-  - `standalone/output/plots/<trigger_tag>/single_electron/...`
+- Data/MC are compared separately by `kind`, and plots are written under:
+  - `standalone/output/plots/<kind>/<trigger_tag>/dielectron/...`
+  - `standalone/output/plots/<kind>/<trigger_tag>/single_electron/...`
 - For private/user datasets, use DAS dataset names (`/.../USER`) and set `das_instance: prod/phys03`; these are not filesystem paths.
 - If `dataset` is a `root://...` directory (or `/store/...`), file listing is done with `xrdfs ... ls` instead of `dasgoclient`.
 - If you already have explicit ROOT files in YAML, you can skip DAS lookup:

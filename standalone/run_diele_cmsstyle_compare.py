@@ -611,18 +611,25 @@ def run_comparisons(
     return summary
 
 
-def find_baseline_custom_samples(samples_cfg: Dict[str, Dict]) -> Tuple[Tuple[str, Dict], Tuple[str, Dict]]:
-    baseline = None
-    custom = None
+def find_pairs_by_kind(samples_cfg: Dict[str, Dict]) -> Dict[str, Tuple[Tuple[str, Dict], Tuple[str, Dict]]]:
+    grouped: Dict[str, Dict[str, Tuple[str, Dict]]] = {}
     for name, cfg in samples_cfg.items():
+        kind = str(cfg.get("kind", "unknown")).lower()
         variant = str(cfg.get("variant", "")).lower()
-        if variant == "baseline":
-            baseline = (name, cfg)
-        elif variant == "custom":
-            custom = (name, cfg)
-    if baseline is None or custom is None:
-        raise RuntimeError("Need one baseline and one custom sample in config (via `variant: baseline/custom`).")
-    return baseline, custom
+        if variant not in ("baseline", "custom"):
+            continue
+        grouped.setdefault(kind, {})[variant] = (name, cfg)
+
+    pairs: Dict[str, Tuple[Tuple[str, Dict], Tuple[str, Dict]]] = {}
+    for kind, items in grouped.items():
+        if "baseline" in items and "custom" in items:
+            pairs[kind] = (items["baseline"], items["custom"])
+        else:
+            log(f"[kind={kind}] Skip: need both baseline and custom")
+
+    if not pairs:
+        raise RuntimeError("No complete baseline/custom pairs found by kind in config.")
+    return pairs
 
 
 def main() -> None:
@@ -659,67 +666,72 @@ def main() -> None:
     max_files = args.max_files if args.max_files is not None else cfg.get("max_files_per_sample")
     comparison_triggers = cfg.get("comparison_triggers", DEFAULT_COMPARISON_TRIGGERS)
     samples_cfg = cfg.get("samples", {})
-    baseline_entry, custom_entry = find_baseline_custom_samples(samples_cfg)
+    pairs_by_kind = find_pairs_by_kind(samples_cfg)
 
     summary = {}
-    summary["triggers"] = {}
-    baseline_name, _ = baseline_entry
-    custom_name, _ = custom_entry
+    summary["kinds"] = {}
 
-    for trigger_tag, trigger_field in comparison_triggers.items():
-        log(f"[trigger={trigger_tag}] Start")
-        sample_results = {}
-        trig_sum = {}
-        if args.plot_only:
-            log(f"[trigger={trigger_tag}] Plot-only mode: load cached arrays")
-            for sample_name, _sample_cfg in (baseline_entry, custom_entry):
-                sample_results[sample_name] = load_stage1_arrays(stage1_dir, sample_name, trigger_tag)
-                trig_sum[sample_name] = {
-                    "stage1_cache": str(stage1_dir / f"{sample_name}__{trigger_tag}.npz"),
-                    "mode": "plot-only",
-                }
-        else:
-            for sample_name, sample_cfg in (baseline_entry, custom_entry):
-                log(f"[{sample_name}] Resolve input files")
-                files = resolve_sample_files(sample_cfg, redirector, max_files, args.skip_das, das_instance)
-                if not files:
-                    raise RuntimeError(f"No files resolved for sample {sample_name}")
-                sample_results[sample_name] = run_sample(files, cfg, sample_name, trigger_field=trigger_field)
-                save_stage1_arrays(stage1_dir, sample_name, trigger_tag, sample_results[sample_name])
-                trig_sum[sample_name] = {
-                    "n_files": len(files),
-                    "stage1_cache": str(stage1_dir / f"{sample_name}__{trigger_tag}.npz"),
-                    "mode": "process+plot",
-                }
+    for kind, (baseline_entry, custom_entry) in pairs_by_kind.items():
+        log(f"[kind={kind}] Start")
+        kind_summary = {"triggers": {}}
+        baseline_name, _ = baseline_entry
+        custom_name, _ = custom_entry
 
-        selection_text = f"Pass DST.{trigger_field}, n_{{e}}(after WP)=2, OS"
-        log(f"[trigger={trigger_tag}] Start CMS-style comparison plotting")
-        dielectron_summary = run_comparisons(
-            sample_results[baseline_name],
-            sample_results[custom_name],
-            output_dir / "plots" / trigger_tag / "dielectron",
-            variable_specs=DIELECTRON_VARIABLE_SPECS,
-            selection_text=selection_text,
-            title_suffix="dielectron",
-            ratio_min=args.ratio_min,
-            ratio_max=args.ratio_max,
-        )
-        single_selection_text = f"Pass DST.{trigger_field}, n_{{e}}(after WP)=1"
-        single_electron_summary = run_comparisons(
-            sample_results[baseline_name],
-            sample_results[custom_name],
-            output_dir / "plots" / trigger_tag / "single_electron",
-            variable_specs=SINGLE_ELECTRON_VARIABLE_SPECS,
-            selection_text=single_selection_text,
-            title_suffix="single electron",
-            ratio_min=args.ratio_min,
-            ratio_max=args.ratio_max,
-        )
-        trig_sum["plot_summary"] = {
-            "dielectron": dielectron_summary,
-            "single_electron": single_electron_summary,
-        }
-        summary["triggers"][trigger_tag] = trig_sum
+        for trigger_tag, trigger_field in comparison_triggers.items():
+            log(f"[kind={kind}] [trigger={trigger_tag}] Start")
+            sample_results = {}
+            trig_sum = {}
+            if args.plot_only:
+                log(f"[kind={kind}] [trigger={trigger_tag}] Plot-only mode: load cached arrays")
+                for sample_name, _sample_cfg in (baseline_entry, custom_entry):
+                    sample_results[sample_name] = load_stage1_arrays(stage1_dir, sample_name, trigger_tag)
+                    trig_sum[sample_name] = {
+                        "stage1_cache": str(stage1_dir / f"{sample_name}__{trigger_tag}.npz"),
+                        "mode": "plot-only",
+                    }
+            else:
+                for sample_name, sample_cfg in (baseline_entry, custom_entry):
+                    log(f"[{sample_name}] Resolve input files")
+                    files = resolve_sample_files(sample_cfg, redirector, max_files, args.skip_das, das_instance)
+                    if not files:
+                        raise RuntimeError(f"No files resolved for sample {sample_name}")
+                    sample_results[sample_name] = run_sample(files, cfg, sample_name, trigger_field=trigger_field)
+                    save_stage1_arrays(stage1_dir, sample_name, trigger_tag, sample_results[sample_name])
+                    trig_sum[sample_name] = {
+                        "n_files": len(files),
+                        "stage1_cache": str(stage1_dir / f"{sample_name}__{trigger_tag}.npz"),
+                        "mode": "process+plot",
+                    }
+
+            selection_text = f"Pass DST.{trigger_field}, n_{{e}}(after WP)=2, OS"
+            log(f"[kind={kind}] [trigger={trigger_tag}] Start CMS-style comparison plotting")
+            dielectron_summary = run_comparisons(
+                sample_results[baseline_name],
+                sample_results[custom_name],
+                output_dir / "plots" / kind / trigger_tag / "dielectron",
+                variable_specs=DIELECTRON_VARIABLE_SPECS,
+                selection_text=selection_text,
+                title_suffix="dielectron",
+                ratio_min=args.ratio_min,
+                ratio_max=args.ratio_max,
+            )
+            single_selection_text = f"Pass DST.{trigger_field}, n_{{e}}(after WP)=1"
+            single_electron_summary = run_comparisons(
+                sample_results[baseline_name],
+                sample_results[custom_name],
+                output_dir / "plots" / kind / trigger_tag / "single_electron",
+                variable_specs=SINGLE_ELECTRON_VARIABLE_SPECS,
+                selection_text=single_selection_text,
+                title_suffix="single electron",
+                ratio_min=args.ratio_min,
+                ratio_max=args.ratio_max,
+            )
+            trig_sum["plot_summary"] = {
+                "dielectron": dielectron_summary,
+                "single_electron": single_electron_summary,
+            }
+            kind_summary["triggers"][trigger_tag] = trig_sum
+        summary["kinds"][kind] = kind_summary
 
     with open(output_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, sort_keys=True)
