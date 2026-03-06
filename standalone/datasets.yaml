@@ -28,17 +28,7 @@ tnp:
     - PFScouting_SinglePhotonEB
 
 samples:
-  mc_baseline:
-    kind: mc
-    variant: baseline
-    dataset: /TTToLNu2Q_TuneCP5_13p6TeV_powheg-pythia8/ppradeep-GRun_16_0_0_V30_baseline_ScoutingNano-00000000000000000000000000000000/USER
-
-  mc_custom:
-    kind: mc
-    variant: custom
-    dataset: /TTToLNu2Q_TuneCP5_13p6TeV_powheg-pythia8/ppradeep-GRun_16_0_0_V30_customise_case1_ScoutingNano-00000000000000000000000000000000/USER
-
-  # Fill these with your data datasets when ready.
+  # Data samples.
   # Optionally, instead of "dataset", provide explicit ROOT files using:
   # files:
   #   - /store/...
