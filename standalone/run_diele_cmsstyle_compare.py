@@ -34,6 +34,7 @@ ROOT.gROOT.SetBatch(True)
 ELECTRON_MASS_GEV = 0.00051099895
 WP_ORDER = ["Veto", "Loose", "Medium", "Tight"]
 WP_LABELS = ["no-id"] + WP_ORDER + [f"{wp}-noiso" for wp in WP_ORDER]
+STAGE1_DIRNAME = "stage1_arrays"
 
 VARIABLE_SPECS = {
     "mass_full": {"source": "mass", "bins": (160, 0.2, 160.0), "xlabel": "m_{ee} [GeV]"},
@@ -341,6 +342,46 @@ def run_sample(files: List[str], cfg: Dict, sample_name: str) -> Dict[str, Dict[
     return result
 
 
+def _flatten_key(wp: str, var: str) -> str:
+    return f"{wp}::{var}"
+
+
+def _unflatten_key(key: str) -> Tuple[str, str]:
+    wp, var = key.split("::", 1)
+    return wp, var
+
+
+def save_stage1_arrays(stage1_dir: Path, sample_name: str, arrays: Dict[str, Dict[str, np.ndarray]]) -> Path:
+    stage1_dir.mkdir(parents=True, exist_ok=True)
+    payload: Dict[str, np.ndarray] = {}
+    for wp in WP_LABELS:
+        for var in arrays.get(wp, {}):
+            payload[_flatten_key(wp, var)] = arrays[wp][var]
+    outpath = stage1_dir / f"{sample_name}.npz"
+    np.savez_compressed(outpath, **payload)
+    log(f"[{sample_name}] Saved stage-1 arrays: {outpath}")
+    return outpath
+
+
+def load_stage1_arrays(stage1_dir: Path, sample_name: str) -> Dict[str, Dict[str, np.ndarray]]:
+    inpath = stage1_dir / f"{sample_name}.npz"
+    if not inpath.exists():
+        raise FileNotFoundError(f"Missing stage-1 cache: {inpath}")
+
+    arrays: Dict[str, Dict[str, np.ndarray]] = {wp: {} for wp in WP_LABELS}
+    with np.load(inpath, allow_pickle=False) as data:
+        for key in data.files:
+            wp, var = _unflatten_key(key)
+            arrays.setdefault(wp, {})[var] = np.asarray(data[key], dtype=np.float32)
+
+    for wp in WP_LABELS:
+        for source in {spec["source"] for spec in VARIABLE_SPECS.values()}:
+            arrays[wp].setdefault(source, np.array([], dtype=np.float32))
+
+    log(f"[{sample_name}] Loaded stage-1 arrays: {inpath}")
+    return arrays
+
+
 def build_hist(name: str, values: np.ndarray, bins: Tuple[int, float, float]) -> ROOT.TH1F:
     nbins, xmin, xmax = bins
     hist = ROOT.TH1F(name, "", nbins, xmin, xmax)
@@ -522,6 +563,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="CMS-style dielectron comparison (no Tag-and-Probe)")
     parser.add_argument("--config", required=True, help="YAML config path")
     parser.add_argument("--output", required=True, help="Output directory")
+    parser.add_argument("--plot-only", action="store_true", help="Skip Coffea processing and replot from cached stage-1 arrays")
+    parser.add_argument(
+        "--stage1-dir",
+        default=None,
+        help=f"Directory for stage-1 cache (.npz). Default: <output>/{STAGE1_DIRNAME}",
+    )
     parser.add_argument("--skip-das", action="store_true", help="Disable DAS lookups")
     parser.add_argument("--max-files", type=int, default=None, help="Optional max files per sample")
     args = parser.parse_args()
@@ -535,6 +582,7 @@ def main() -> None:
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
+    stage1_dir = Path(args.stage1_dir) if args.stage1_dir else (output_dir / STAGE1_DIRNAME)
 
     redirector = cfg.get("redirector", "root://xrootd-cms.infn.it//")
     das_instance = cfg.get("das_instance", "prod/phys03")
@@ -544,13 +592,20 @@ def main() -> None:
 
     summary = {}
     sample_results = {}
-    for sample_name, sample_cfg in (baseline_entry, custom_entry):
-        log(f"[{sample_name}] Resolve input files")
-        files = resolve_sample_files(sample_cfg, redirector, max_files, args.skip_das, das_instance)
-        if not files:
-            raise RuntimeError(f"No files resolved for sample {sample_name}")
-        sample_results[sample_name] = run_sample(files, cfg, sample_name)
-        summary[sample_name] = {"n_files": len(files)}
+    if args.plot_only:
+        log("Plot-only mode: skip stage-1 processing and load cached arrays")
+        for sample_name, _sample_cfg in (baseline_entry, custom_entry):
+            sample_results[sample_name] = load_stage1_arrays(stage1_dir, sample_name)
+            summary[sample_name] = {"stage1_cache": str(stage1_dir / f"{sample_name}.npz"), "mode": "plot-only"}
+    else:
+        for sample_name, sample_cfg in (baseline_entry, custom_entry):
+            log(f"[{sample_name}] Resolve input files")
+            files = resolve_sample_files(sample_cfg, redirector, max_files, args.skip_das, das_instance)
+            if not files:
+                raise RuntimeError(f"No files resolved for sample {sample_name}")
+            sample_results[sample_name] = run_sample(files, cfg, sample_name)
+            save_stage1_arrays(stage1_dir, sample_name, sample_results[sample_name])
+            summary[sample_name] = {"n_files": len(files), "stage1_cache": str(stage1_dir / f"{sample_name}.npz"), "mode": "process+plot"}
 
     baseline_name, _ = baseline_entry
     custom_name, _ = custom_entry
