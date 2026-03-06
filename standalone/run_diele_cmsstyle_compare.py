@@ -30,11 +30,16 @@ from electron_id import electron_id_mask
 
 vector.register_awkward()
 ROOT.gROOT.SetBatch(True)
+ROOT.gStyle.SetOptStat(0)
 
 ELECTRON_MASS_GEV = 0.00051099895
 WP_ORDER = ["Veto", "Loose", "Medium", "Tight"]
 WP_LABELS = ["no-id"] + WP_ORDER + [f"{wp}-noiso" for wp in WP_ORDER]
 STAGE1_DIRNAME = "stage1_arrays"
+DEFAULT_COMPARISON_TRIGGERS = {
+    "doubleEG": "PFScouting_DoubleEG",
+    "singlePhoton": "PFScouting_SinglePhotonEB",
+}
 
 VARIABLE_SPECS = {
     "mass_full": {"source": "mass", "bins": (160, 0.2, 160.0), "xlabel": "m_{ee} [GeV]"},
@@ -190,7 +195,8 @@ def resolve_sample_files(
 
 
 class DielectronProcessor(processor.ProcessorABC):
-    def __init__(self):
+    def __init__(self, trigger_field: str):
+        self.trigger_field = trigger_field
         self.var_names = ["mass"] + sorted({spec["source"] for spec in VARIABLE_SPECS.values() if spec["source"] != "mass"})
         self._accumulator = processor.dict_accumulator(
             {
@@ -239,8 +245,8 @@ class DielectronProcessor(processor.ProcessorABC):
 
         electrons = events.ScoutingElectron
 
-        if "DST" in events.fields and "PFScouting_DoubleEG" in events.DST.fields:
-            trigger_mask = events.DST.PFScouting_DoubleEG
+        if "DST" in events.fields and self.trigger_field in events.DST.fields:
+            trigger_mask = events.DST[self.trigger_field]
         else:
             trigger_mask = self._ones_like(events)
             trigger_mask = trigger_mask & False
@@ -330,10 +336,10 @@ def build_runner(cfg: Dict) -> Runner:
     )
 
 
-def run_sample(files: List[str], cfg: Dict, sample_name: str) -> Dict[str, Dict[str, np.ndarray]]:
+def run_sample(files: List[str], cfg: Dict, sample_name: str, trigger_field: str) -> Dict[str, Dict[str, np.ndarray]]:
     runner = build_runner(cfg)
-    processor_instance = DielectronProcessor()
-    log(f"[{sample_name}] Start processing {len(files)} files")
+    processor_instance = DielectronProcessor(trigger_field=trigger_field)
+    log(f"[{sample_name}] Start processing {len(files)} files with trigger {trigger_field}")
     output = runner({"sample": files}, treename=cfg.get("tree_name", "Events"), processor_instance=processor_instance)
     result: Dict[str, Dict[str, np.ndarray]] = {}
     for wp in WP_LABELS:
@@ -351,20 +357,22 @@ def _unflatten_key(key: str) -> Tuple[str, str]:
     return wp, var
 
 
-def save_stage1_arrays(stage1_dir: Path, sample_name: str, arrays: Dict[str, Dict[str, np.ndarray]]) -> Path:
+def save_stage1_arrays(
+    stage1_dir: Path, sample_name: str, trigger_tag: str, arrays: Dict[str, Dict[str, np.ndarray]]
+) -> Path:
     stage1_dir.mkdir(parents=True, exist_ok=True)
     payload: Dict[str, np.ndarray] = {}
     for wp in WP_LABELS:
         for var in arrays.get(wp, {}):
             payload[_flatten_key(wp, var)] = arrays[wp][var]
-    outpath = stage1_dir / f"{sample_name}.npz"
+    outpath = stage1_dir / f"{sample_name}__{trigger_tag}.npz"
     np.savez_compressed(outpath, **payload)
-    log(f"[{sample_name}] Saved stage-1 arrays: {outpath}")
+    log(f"[{sample_name}/{trigger_tag}] Saved stage-1 arrays: {outpath}")
     return outpath
 
 
-def load_stage1_arrays(stage1_dir: Path, sample_name: str) -> Dict[str, Dict[str, np.ndarray]]:
-    inpath = stage1_dir / f"{sample_name}.npz"
+def load_stage1_arrays(stage1_dir: Path, sample_name: str, trigger_tag: str) -> Dict[str, Dict[str, np.ndarray]]:
+    inpath = stage1_dir / f"{sample_name}__{trigger_tag}.npz"
     if not inpath.exists():
         raise FileNotFoundError(f"Missing stage-1 cache: {inpath}")
 
@@ -378,7 +386,7 @@ def load_stage1_arrays(stage1_dir: Path, sample_name: str) -> Dict[str, Dict[str
         for source in {spec["source"] for spec in VARIABLE_SPECS.values()}:
             arrays[wp].setdefault(source, np.array([], dtype=np.float32))
 
-    log(f"[{sample_name}] Loaded stage-1 arrays: {inpath}")
+    log(f"[{sample_name}/{trigger_tag}] Loaded stage-1 arrays: {inpath}")
     return arrays
 
 
@@ -424,6 +432,9 @@ def draw_comparison(
     h_base = build_hist(f"h_base_{outpath.stem}", baseline, bins)
     h_cust = build_hist(f"h_cust_{outpath.stem}", custom, bins)
     h_ratio = ratio_hist(h_cust, h_base, f"h_ratio_{outpath.stem}")
+    h_base.SetStats(0)
+    h_cust.SetStats(0)
+    h_ratio.SetStats(0)
 
     h_base.SetLineColor(COLORS["baseline"])
     h_base.SetMarkerColor(COLORS["baseline"])
@@ -519,10 +530,12 @@ def draw_comparison(
 
 
 def run_comparisons(
-    baseline_arrays: Dict[str, Dict[str, np.ndarray]], custom_arrays: Dict[str, Dict[str, np.ndarray]], output_dir: Path
+    baseline_arrays: Dict[str, Dict[str, np.ndarray]],
+    custom_arrays: Dict[str, Dict[str, np.ndarray]],
+    output_dir: Path,
+    selection_text: str,
 ) -> Dict[str, Dict[str, int]]:
     summary: Dict[str, Dict[str, int]] = {}
-    selection_text = "Pass DST_PFScouting_DoubleEG, n_{e}(after WP)=2, OS"
     for wp in WP_LABELS:
         wp_dir = output_dir / wp.replace("-", "_")
         wp_dir.mkdir(parents=True, exist_ok=True)
@@ -587,31 +600,51 @@ def main() -> None:
     redirector = cfg.get("redirector", "root://xrootd-cms.infn.it//")
     das_instance = cfg.get("das_instance", "prod/phys03")
     max_files = args.max_files if args.max_files is not None else cfg.get("max_files_per_sample")
+    comparison_triggers = cfg.get("comparison_triggers", DEFAULT_COMPARISON_TRIGGERS)
     samples_cfg = cfg.get("samples", {})
     baseline_entry, custom_entry = find_baseline_custom_samples(samples_cfg)
 
     summary = {}
-    sample_results = {}
-    if args.plot_only:
-        log("Plot-only mode: skip stage-1 processing and load cached arrays")
-        for sample_name, _sample_cfg in (baseline_entry, custom_entry):
-            sample_results[sample_name] = load_stage1_arrays(stage1_dir, sample_name)
-            summary[sample_name] = {"stage1_cache": str(stage1_dir / f"{sample_name}.npz"), "mode": "plot-only"}
-    else:
-        for sample_name, sample_cfg in (baseline_entry, custom_entry):
-            log(f"[{sample_name}] Resolve input files")
-            files = resolve_sample_files(sample_cfg, redirector, max_files, args.skip_das, das_instance)
-            if not files:
-                raise RuntimeError(f"No files resolved for sample {sample_name}")
-            sample_results[sample_name] = run_sample(files, cfg, sample_name)
-            save_stage1_arrays(stage1_dir, sample_name, sample_results[sample_name])
-            summary[sample_name] = {"n_files": len(files), "stage1_cache": str(stage1_dir / f"{sample_name}.npz"), "mode": "process+plot"}
-
+    summary["triggers"] = {}
     baseline_name, _ = baseline_entry
     custom_name, _ = custom_entry
-    log("Start CMS-style comparison plotting")
-    plot_summary = run_comparisons(sample_results[baseline_name], sample_results[custom_name], output_dir / "plots")
-    summary["plot_summary"] = plot_summary
+
+    for trigger_tag, trigger_field in comparison_triggers.items():
+        log(f"[trigger={trigger_tag}] Start")
+        sample_results = {}
+        trig_sum = {}
+        if args.plot_only:
+            log(f"[trigger={trigger_tag}] Plot-only mode: load cached arrays")
+            for sample_name, _sample_cfg in (baseline_entry, custom_entry):
+                sample_results[sample_name] = load_stage1_arrays(stage1_dir, sample_name, trigger_tag)
+                trig_sum[sample_name] = {
+                    "stage1_cache": str(stage1_dir / f"{sample_name}__{trigger_tag}.npz"),
+                    "mode": "plot-only",
+                }
+        else:
+            for sample_name, sample_cfg in (baseline_entry, custom_entry):
+                log(f"[{sample_name}] Resolve input files")
+                files = resolve_sample_files(sample_cfg, redirector, max_files, args.skip_das, das_instance)
+                if not files:
+                    raise RuntimeError(f"No files resolved for sample {sample_name}")
+                sample_results[sample_name] = run_sample(files, cfg, sample_name, trigger_field=trigger_field)
+                save_stage1_arrays(stage1_dir, sample_name, trigger_tag, sample_results[sample_name])
+                trig_sum[sample_name] = {
+                    "n_files": len(files),
+                    "stage1_cache": str(stage1_dir / f"{sample_name}__{trigger_tag}.npz"),
+                    "mode": "process+plot",
+                }
+
+        selection_text = f"Pass DST.{trigger_field}, n_{{e}}(after WP)=2, OS"
+        log(f"[trigger={trigger_tag}] Start CMS-style comparison plotting")
+        plot_summary = run_comparisons(
+            sample_results[baseline_name],
+            sample_results[custom_name],
+            output_dir / "plots" / trigger_tag,
+            selection_text=selection_text,
+        )
+        trig_sum["plot_summary"] = plot_summary
+        summary["triggers"][trigger_tag] = trig_sum
 
     with open(output_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, sort_keys=True)

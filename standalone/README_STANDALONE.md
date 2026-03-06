@@ -9,7 +9,7 @@
 1. Reads baseline/custom dataset definitions from YAML.
 2. Resolves ROOT files from DAS (`dasgoclient`, `prod/phys03`) or XRootD directory listing.
 3. Applies event selection:
-   - `DST.PFScouting_DoubleEG`,
+   - trigger set from `comparison_triggers` (default: `PFScouting_DoubleEG` and `PFScouting_SinglePhotonEB`),
    - apply WP to electrons first,
    - then require `nElectron == 2`,
    - opposite-sign charges.
@@ -18,6 +18,7 @@
 5. Produces CMS-style plots with ratio panel (Custom/Baseline), including:
    - dielectron mass (full, J/#psi region, Z region),
    - leading/subleading `bestTrack` variables.
+6. ROOT stat box is disabled for cleaner comparison plots.
 
 ## Run
 Stage 1 + Stage 2 (process and plot):
@@ -40,6 +41,7 @@ python3 standalone/run_diele_cmsstyle_compare.py \
 - Electron ID is imported from your shared project file: `electron_id.py`.
 - The script prints timestamped progress in shell (DAS query, sample start/end, output writes, plot generation).
 - Stage-1 cached arrays are written to `standalone/output/stage1_arrays/` by default (`--stage1-dir` to override).
+- Plots are written under `standalone/output/plots/<trigger_tag>/...` for each trigger set.
 - For private/user datasets, use DAS dataset names (`/.../USER`) and set `das_instance: prod/phys03`; these are not filesystem paths.
 - If `dataset` is a `root://...` directory (or `/store/...`), file listing is done with `xrdfs ... ls` instead of `dasgoclient`.
 - If you already have explicit ROOT files in YAML, you can skip DAS lookup:
