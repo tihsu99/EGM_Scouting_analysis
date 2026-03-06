@@ -41,7 +41,7 @@ DEFAULT_COMPARISON_TRIGGERS = {
     "singlePhoton": "PFScouting_SinglePhotonEB",
 }
 
-VARIABLE_SPECS = {
+DIELECTRON_VARIABLE_SPECS = {
     "mass_full": {"source": "mass", "bins": (160, 0.2, 160.0), "xlabel": "m_{ee} [GeV]"},
     "mass_jpsi": {"source": "mass", "bins": (80, 2.6, 3.4), "xlabel": "m_{ee} [GeV]"},
     "mass_z": {"source": "mass", "bins": (80, 70.0, 110.0), "xlabel": "m_{ee} [GeV]"},
@@ -94,6 +94,33 @@ VARIABLE_SPECS = {
         "xlabel": "Subleading bestTrack #chi^{2}/ndf",
     },
 }
+
+SINGLE_ELECTRON_VARIABLE_SPECS = {
+    "single_bestTrack_pt": {"source": "single_bestTrack_pt", "bins": (100, 0.0, 200.0), "xlabel": "Electron bestTrack p_{T} [GeV]"},
+    "single_bestTrack_etaMode": {
+        "source": "single_bestTrack_etaMode",
+        "bins": (100, -2.5, 2.5),
+        "xlabel": "Electron bestTrack #eta_{mode}",
+    },
+    "single_bestTrack_phiMode": {
+        "source": "single_bestTrack_phiMode",
+        "bins": (128, -3.2, 3.2),
+        "xlabel": "Electron bestTrack #phi_{mode}",
+    },
+    "single_bestTrack_d0": {"source": "single_bestTrack_d0", "bins": (120, -0.06, 0.06), "xlabel": "Electron bestTrack d_{0} [cm]"},
+    "single_bestTrack_dz": {"source": "single_bestTrack_dz", "bins": (120, -0.30, 0.30), "xlabel": "Electron bestTrack d_{z} [cm]"},
+    "single_bestTrack_chi2overndf": {
+        "source": "single_bestTrack_chi2overndf",
+        "bins": (100, 0.0, 20.0),
+        "xlabel": "Electron bestTrack #chi^{2}/ndf",
+    },
+    "single_bestTrack_charge": {"source": "single_bestTrack_charge", "bins": (3, -1.5, 1.5), "xlabel": "Electron charge"},
+}
+
+ALL_SOURCE_NAMES = sorted(
+    {spec["source"] for spec in DIELECTRON_VARIABLE_SPECS.values()}
+    | {spec["source"] for spec in SINGLE_ELECTRON_VARIABLE_SPECS.values()}
+)
 
 COLORS = {
     "baseline": ROOT.TColor.GetColor("#1f77b4"),
@@ -197,7 +224,7 @@ def resolve_sample_files(
 class DielectronProcessor(processor.ProcessorABC):
     def __init__(self, trigger_field: str):
         self.trigger_field = trigger_field
-        self.var_names = ["mass"] + sorted({spec["source"] for spec in VARIABLE_SPECS.values() if spec["source"] != "mass"})
+        self.var_names = ALL_SOURCE_NAMES
         self._accumulator = processor.dict_accumulator(
             {
                 wp: processor.dict_accumulator({name: col_accumulator(np.float32) for name in self.var_names})
@@ -280,6 +307,24 @@ class DielectronProcessor(processor.ProcessorABC):
 
         for wp, ele_mask in wp_ele_masks.items():
             electrons_wp = electrons[ele_mask]
+
+            n1_mask = ak.num(electrons_wp) == 1
+            electrons_single = electrons_wp[n1_mask]
+            if len(electrons_single) > 0:
+                electrons_single = electrons_single[ak.argsort(electrons_single.bestTrack_pt, axis=-1, ascending=False)]
+                single = electrons_single[:, 0]
+                single_var_map = {
+                    "single_bestTrack_pt": single.bestTrack_pt,
+                    "single_bestTrack_etaMode": self._field_or(single, "bestTrack_etaMode", "bestTrack_eta"),
+                    "single_bestTrack_phiMode": self._field_or(single, "bestTrack_phiMode", "bestTrack_phi"),
+                    "single_bestTrack_d0": single.bestTrack_d0,
+                    "single_bestTrack_dz": single.bestTrack_dz,
+                    "single_bestTrack_chi2overndf": single.bestTrack_chi2overndf,
+                    "single_bestTrack_charge": single.bestTrack_charge,
+                }
+                for var_name, values in single_var_map.items():
+                    self._add_column(out[wp], var_name, values)
+
             n2_mask = ak.num(electrons_wp) == 2
             electrons_wp = electrons_wp[n2_mask]
             if len(electrons_wp) == 0:
@@ -383,7 +428,7 @@ def load_stage1_arrays(stage1_dir: Path, sample_name: str, trigger_tag: str) -> 
             arrays.setdefault(wp, {})[var] = np.asarray(data[key], dtype=np.float32)
 
     for wp in WP_LABELS:
-        for source in {spec["source"] for spec in VARIABLE_SPECS.values()}:
+        for source in ALL_SOURCE_NAMES:
             arrays[wp].setdefault(source, np.array([], dtype=np.float32))
 
     log(f"[{sample_name}/{trigger_tag}] Loaded stage-1 arrays: {inpath}")
@@ -428,6 +473,8 @@ def draw_comparison(
     title_text: str,
     selection_text: str,
     outpath: Path,
+    ratio_min: float,
+    ratio_max: float,
 ) -> None:
     h_base = build_hist(f"h_base_{outpath.stem}", baseline, bins)
     h_cust = build_hist(f"h_cust_{outpath.stem}", custom, bins)
@@ -512,8 +559,8 @@ def draw_comparison(
     h_ratio.GetXaxis().SetTitleSize(0.11)
     h_ratio.GetXaxis().SetTitleOffset(1.1)
     h_ratio.GetXaxis().SetLabelSize(0.10)
-    h_ratio.SetMinimum(0.8)
-    h_ratio.SetMaximum(1.2)
+    h_ratio.SetMinimum(ratio_min)
+    h_ratio.SetMaximum(ratio_max)
     h_ratio.SetMarkerStyle(20)
     h_ratio.SetMarkerSize(0.6)
     h_ratio.SetLineColor(COLORS["custom"])
@@ -533,14 +580,18 @@ def run_comparisons(
     baseline_arrays: Dict[str, Dict[str, np.ndarray]],
     custom_arrays: Dict[str, Dict[str, np.ndarray]],
     output_dir: Path,
+    variable_specs: Dict[str, Dict[str, object]],
     selection_text: str,
+    title_suffix: str,
+    ratio_min: float,
+    ratio_max: float,
 ) -> Dict[str, Dict[str, int]]:
     summary: Dict[str, Dict[str, int]] = {}
     for wp in WP_LABELS:
         wp_dir = output_dir / wp.replace("-", "_")
         wp_dir.mkdir(parents=True, exist_ok=True)
         summary[wp] = {}
-        for plot_name, spec in VARIABLE_SPECS.items():
+        for plot_name, spec in variable_specs.items():
             source = spec["source"]
             baseline = baseline_arrays[wp].get(source, np.array([], dtype=np.float32))
             custom = custom_arrays[wp].get(source, np.array([], dtype=np.float32))
@@ -550,9 +601,11 @@ def run_comparisons(
                 custom=custom,
                 bins=spec["bins"],
                 xlabel=spec["xlabel"],
-                title_text=f"{wp} selection",
+                title_text=f"{wp} {title_suffix}",
                 selection_text=selection_text,
                 outpath=wp_dir / f"{plot_name}.png",
+                ratio_min=ratio_min,
+                ratio_max=ratio_max,
             )
         log(f"[plots] Finished WP {wp}")
     return summary
@@ -584,7 +637,11 @@ def main() -> None:
     )
     parser.add_argument("--skip-das", action="store_true", help="Disable DAS lookups")
     parser.add_argument("--max-files", type=int, default=None, help="Optional max files per sample")
+    parser.add_argument("--ratio-min", type=float, default=0.9, help="Lower y-limit for ratio panel")
+    parser.add_argument("--ratio-max", type=float, default=1.1, help="Upper y-limit for ratio panel")
     args = parser.parse_args()
+    if args.ratio_min >= args.ratio_max:
+        raise ValueError("--ratio-min must be smaller than --ratio-max")
 
     CMS.SetExtraText("Preliminary")
     CMS.SetEnergy("13.6")
@@ -637,13 +694,31 @@ def main() -> None:
 
         selection_text = f"Pass DST.{trigger_field}, n_{{e}}(after WP)=2, OS"
         log(f"[trigger={trigger_tag}] Start CMS-style comparison plotting")
-        plot_summary = run_comparisons(
+        dielectron_summary = run_comparisons(
             sample_results[baseline_name],
             sample_results[custom_name],
-            output_dir / "plots" / trigger_tag,
+            output_dir / "plots" / trigger_tag / "dielectron",
+            variable_specs=DIELECTRON_VARIABLE_SPECS,
             selection_text=selection_text,
+            title_suffix="dielectron",
+            ratio_min=args.ratio_min,
+            ratio_max=args.ratio_max,
         )
-        trig_sum["plot_summary"] = plot_summary
+        single_selection_text = f"Pass DST.{trigger_field}, n_{{e}}(after WP)=1"
+        single_electron_summary = run_comparisons(
+            sample_results[baseline_name],
+            sample_results[custom_name],
+            output_dir / "plots" / trigger_tag / "single_electron",
+            variable_specs=SINGLE_ELECTRON_VARIABLE_SPECS,
+            selection_text=single_selection_text,
+            title_suffix="single electron",
+            ratio_min=args.ratio_min,
+            ratio_max=args.ratio_max,
+        )
+        trig_sum["plot_summary"] = {
+            "dielectron": dielectron_summary,
+            "single_electron": single_electron_summary,
+        }
         summary["triggers"][trigger_tag] = trig_sum
 
     with open(output_dir / "summary.json", "w", encoding="utf-8") as f:

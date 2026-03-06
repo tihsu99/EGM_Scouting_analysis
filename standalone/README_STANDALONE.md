@@ -17,7 +17,8 @@
    - `no-id`, `Veto/Loose/Medium/Tight`, and `Veto/Loose/Medium/Tight-noiso`.
 5. Produces CMS-style plots with ratio panel (Custom/Baseline), including:
    - dielectron mass (full, J/#psi region, Z region),
-   - leading/subleading `bestTrack` variables.
+   - dielectron leading/subleading `bestTrack` variables,
+   - exact one-electron (`nElectron(after WP)=1`) `bestTrack` distributions.
 6. ROOT stat box is disabled for cleaner comparison plots.
 
 ## Run
@@ -25,7 +26,9 @@ Stage 1 + Stage 2 (process and plot):
 ```bash
 python3 standalone/run_diele_cmsstyle_compare.py \
   --config standalone/datasets.yaml \
-  --output standalone/output
+  --output standalone/output \
+  --ratio-min 0.9 \
+  --ratio-max 1.1
 ```
 
 Stage 2 only (replot from cached arrays, fast style iteration):
@@ -33,7 +36,9 @@ Stage 2 only (replot from cached arrays, fast style iteration):
 python3 standalone/run_diele_cmsstyle_compare.py \
   --config standalone/datasets.yaml \
   --output standalone/output \
-  --plot-only
+  --plot-only \
+  --ratio-min 0.9 \
+  --ratio-max 1.1
 ```
 
 ## Notes
@@ -41,7 +46,10 @@ python3 standalone/run_diele_cmsstyle_compare.py \
 - Electron ID is imported from your shared project file: `electron_id.py`.
 - The script prints timestamped progress in shell (DAS query, sample start/end, output writes, plot generation).
 - Stage-1 cached arrays are written to `standalone/output/stage1_arrays/` by default (`--stage1-dir` to override).
-- Plots are written under `standalone/output/plots/<trigger_tag>/...` for each trigger set.
+- Ratio panel range is tunable with `--ratio-min/--ratio-max` (defaults: `0.9` and `1.1`).
+- Plots are written under:
+  - `standalone/output/plots/<trigger_tag>/dielectron/...`
+  - `standalone/output/plots/<trigger_tag>/single_electron/...`
 - For private/user datasets, use DAS dataset names (`/.../USER`) and set `das_instance: prod/phys03`; these are not filesystem paths.
 - If `dataset` is a `root://...` directory (or `/store/...`), file listing is done with `xrdfs ... ls` instead of `dasgoclient`.
 - If you already have explicit ROOT files in YAML, you can skip DAS lookup:
