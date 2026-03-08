@@ -117,6 +117,50 @@ SINGLE_ELECTRON_VARIABLE_SPECS = {
     "single_bestTrack_charge": {"source": "single_bestTrack_charge", "bins": (3, -1.5, 1.5), "xlabel": "Electron charge"},
 }
 
+SCOUTING_FEATURE_BINS = {
+    "rechitZeroSuppression": (2, -0.5, 1.5, "rechitZeroSuppression"),
+    "missingHits": (8, -0.5, 7.5, "missingHits"),
+    "nClusters": (60, 0.0, 60.0, "nClusters"),
+    "nCrystals": (150, 0.0, 300.0, "nCrystals"),
+    "seedId": (200, -100000.0, 100000.0, "seedId"),
+    "corrEcalEnergyError": (120, 0.0, 25.0, "corrEcalEnergyError"),
+    "dEtaIn": (120, -0.06, 0.06, "dEtaIn"),
+    "dPhiIn": (120, -0.30, 0.30, "dPhiIn"),
+    "ecalIso": (120, 0.0, 60.0, "ecalIso"),
+    "eta": (100, -2.5, 2.5, "#eta"),
+    "hOverE": (100, 0.0, 0.25, "H/E"),
+    "hcalIso": (120, 0.0, 60.0, "hcalIso"),
+    "m": (120, 0.0, 0.0015, "m [GeV]"),
+    "ooEMOop": (120, -0.2, 0.2, "ooEMOop"),
+    "phi": (128, -3.2, 3.2, "#phi"),
+    "preshowerEnergy": (120, 0.0, 40.0, "preshowerEnergy"),
+    "pt": (120, 0.0, 200.0, "p_{T} [GeV]"),
+    "r9": (120, 0.0, 1.2, "r9"),
+    "rawEnergy": (120, 0.0, 250.0, "rawEnergy [GeV]"),
+    "sMaj": (120, 0.0, 15.0, "sMaj"),
+    "sMin": (120, 0.0, 5.0, "sMin"),
+    "sigmaIetaIeta": (120, 0.0, 0.06, "#sigma_{i#etai#eta}"),
+    "trackIso": (120, 0.0, 60.0, "trackIso"),
+    "trackfbrem": (120, -0.5, 1.5, "trackfbrem"),
+}
+
+for feature, (nb, xmin, xmax, xlab) in SCOUTING_FEATURE_BINS.items():
+    DIELECTRON_VARIABLE_SPECS[f"lead_{feature}"] = {
+        "source": f"lead_{feature}",
+        "bins": (nb, xmin, xmax),
+        "xlabel": f"Leading {xlab}",
+    }
+    DIELECTRON_VARIABLE_SPECS[f"sublead_{feature}"] = {
+        "source": f"sublead_{feature}",
+        "bins": (nb, xmin, xmax),
+        "xlabel": f"Subleading {xlab}",
+    }
+    SINGLE_ELECTRON_VARIABLE_SPECS[f"single_{feature}"] = {
+        "source": f"single_{feature}",
+        "bins": (nb, xmin, xmax),
+        "xlabel": f"Electron {xlab}",
+    }
+
 ALL_SOURCE_NAMES = sorted(
     {spec["source"] for spec in DIELECTRON_VARIABLE_SPECS.values()}
     | {spec["source"] for spec in SINGLE_ELECTRON_VARIABLE_SPECS.values()}
@@ -290,12 +334,13 @@ class DielectronProcessor(processor.ProcessorABC):
 
         eta_mode = self._field_or(electrons, "bestTrack_etaMode", "bestTrack_eta")
         phi_mode = self._field_or(electrons, "bestTrack_phiMode", "bestTrack_phi")
+        pt_for_p4 = self._field_or(electrons, "bestTrack_pt", "pt")
         electrons["p4"] = ak.zip(
             {
-                "pt": electrons.pt,
+                "pt": pt_for_p4,
                 "eta": eta_mode,
                 "phi": phi_mode,
-                "mass": ak.ones_like(electrons.pt) * ELECTRON_MASS_GEV,
+                "mass": ak.ones_like(pt_for_p4) * ELECTRON_MASS_GEV,
             },
             with_name="Momentum4D",
         )
@@ -315,13 +360,16 @@ class DielectronProcessor(processor.ProcessorABC):
                 single = electrons_single[:, 0]
                 single_var_map = {
                     "single_bestTrack_pt": single.bestTrack_pt,
-                    "single_bestTrack_etaMode": single.bestTrack_etaMode,
-                    "single_bestTrack_phiMode": single.bestTrack_phiMode,
+                    "single_bestTrack_etaMode": self._field_or(single, "bestTrack_etaMode", "bestTrack_eta"),
+                    "single_bestTrack_phiMode": self._field_or(single, "bestTrack_phiMode", "bestTrack_phi"),
                     "single_bestTrack_d0": single.bestTrack_d0,
                     "single_bestTrack_dz": single.bestTrack_dz,
                     "single_bestTrack_chi2overndf": single.bestTrack_chi2overndf,
                     "single_bestTrack_charge": single.bestTrack_charge,
                 }
+                for feature in SCOUTING_FEATURE_BINS:
+                    if feature in single.fields:
+                        single_var_map[f"single_{feature}"] = single[feature]
                 for var_name, values in single_var_map.items():
                     self._add_column(out[wp], var_name, values)
 
@@ -346,10 +394,10 @@ class DielectronProcessor(processor.ProcessorABC):
                 "mass": mass,
                 "lead_bestTrack_pt": lead.bestTrack_pt,
                 "sublead_bestTrack_pt": sublead.bestTrack_pt,
-                "lead_bestTrack_etaMode": lead.bestTrack_etaMode,
-                "sublead_bestTrack_etaMode": sublead.bestTrack_etaMode,
-                "lead_bestTrack_phiMode": lead.bestTrack_phiMode,
-                "sublead_bestTrack_phiMode": sublead.bestTrack_phiMode,
+                "lead_bestTrack_etaMode": self._field_or(lead, "bestTrack_etaMode", "bestTrack_eta"),
+                "sublead_bestTrack_etaMode": self._field_or(sublead, "bestTrack_etaMode", "bestTrack_eta"),
+                "lead_bestTrack_phiMode": self._field_or(lead, "bestTrack_phiMode", "bestTrack_phi"),
+                "sublead_bestTrack_phiMode": self._field_or(sublead, "bestTrack_phiMode", "bestTrack_phi"),
                 "lead_bestTrack_d0": lead.bestTrack_d0,
                 "sublead_bestTrack_d0": sublead.bestTrack_d0,
                 "lead_bestTrack_dz": lead.bestTrack_dz,
@@ -357,6 +405,11 @@ class DielectronProcessor(processor.ProcessorABC):
                 "lead_bestTrack_chi2overndf": lead.bestTrack_chi2overndf,
                 "sublead_bestTrack_chi2overndf": sublead.bestTrack_chi2overndf,
             }
+            for feature in SCOUTING_FEATURE_BINS:
+                if feature in lead.fields:
+                    var_map[f"lead_{feature}"] = lead[feature]
+                if feature in sublead.fields:
+                    var_map[f"sublead_{feature}"] = sublead[feature]
             for var_name, values in var_map.items():
                 self._add_column(out[wp], var_name, values)
 

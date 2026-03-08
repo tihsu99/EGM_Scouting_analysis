@@ -18,7 +18,8 @@
 5. Produces CMS-style plots with ratio panel (Custom/Baseline), including:
    - dielectron mass (full, J/#psi region, Z region),
    - dielectron leading/subleading `bestTrack` variables,
-   - exact one-electron (`nElectron(after WP)=1`) `bestTrack` distributions.
+   - exact one-electron (`nElectron(after WP)=1`) `bestTrack` distributions,
+   - broad `ScoutingElectron` feature monitors (`ooEMOop`, `dEtaIn`, `dPhiIn`, `sigmaIetaIeta`, `H/E`, iso terms, etc.).
 6. ROOT stat box is disabled for cleaner comparison plots.
 
 ## Run
