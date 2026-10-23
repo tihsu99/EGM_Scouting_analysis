@@ -14,8 +14,8 @@ import array
 
 
 CMS.SetExtraText("Preliminary")
-CMS.SetEnergy("13.6")
-CMS.SetLumi("27.8")
+CMS.SetEnergy(13.6)
+CMS.SetLumi(lumi=27.8, run="2024")
 
 hex_colors = [
     "#3f90da", "#ffa90e", "#bd1f01", "#94a4a2", "#832db6",
@@ -192,6 +192,7 @@ def fit_hist(hist, xmin, xmax, fig_name, era, lumi):
 
   plt.tight_layout()
   plt.savefig(f"{fig_name}.png")
+  plt.savefig(f"{fig_name}.pdf")
   plt.show()
   plt.close()
 
@@ -292,7 +293,7 @@ def Derive_Trigger_Efficiency(df, selection, xText, Target_DST, fit, pt_bins, po
     df_base = df[selection]
 
     # Define probe pt bins and eta regions for legend
-    eta_bins = [(0, 1.5)]
+    eta_bins = [(0, 1.44)]
 
     for wp_idx, wp in enumerate(["Loose-noIso", "Medium-noIso", "Tight-noIso"]):
       wp_cut = wp_idx +1
@@ -314,7 +315,7 @@ def Derive_Trigger_Efficiency(df, selection, xText, Target_DST, fit, pt_bins, po
 
 
          if c is None:
-           c = CMS.cmsCanvas('', min(x_binnings), max(x_binnings), 0, 1.1, "scouting electron p_{T} [GeV]", "L1+HLT efficiency", square = CMS.kSquare, extraSpace=0.0, iPos=0)
+           c = CMS.cmsCanvas('', min(x_binnings), max(x_binnings), 0, 1.1, "scouting electron p_{T} [GeV]", "L1T+HLT efficiency", square = True, extraSpace=0.0, iPos=0)
            legend = CMS.cmsLeg(0.44, 0.2, 0.9, 0.4, textSize=0.03)
 
          CMS.cmsDraw(hist_eff[wp][(eta_min, eta_max)], 'P E', lcolor = default_colors[icolor], mcolor = default_colors[icolor], msize=1, lwidth=2, fstyle=0)
@@ -328,10 +329,9 @@ def Derive_Trigger_Efficiency(df, selection, xText, Target_DST, fit, pt_bins, po
     label.SetTextSize(0.03)
     label.SetTextAlign(11)  # Left-top corner
 
-    DST_text = "Scouting double-EG trigger(2024)" if "DoubleEG" in Target_DST else "Scouting single-Photon trigger(2024)"
+    DST_text = "Scouting double-EG trigger(2024)" if "DoubleEG" in Target_DST else "DST_PFScouting_SinglePhotonEB"
     label.DrawLatex(0.47, 0.42, DST_text)
-
-    hdf = CMS.GetcmsCanvasHist(c)
+    hdf = c.GetListOfPrimitives().FindObject("hframe")
     hdf.GetYaxis().SetLabelSize(0.04)
     hdf.GetYaxis().SetTitleOffset(1.2)
     hdf.GetYaxis().SetTitleSize(0.05)
@@ -439,16 +439,26 @@ def Derive_Trigger_Efficiency_orthogonal_2D(df, selection, xText, Target_DST, fi
             hist_pass.GetXaxis().GetXmax(),
             hist_pass.GetYaxis().GetXmin(),
             hist_pass.GetYaxis().GetXmax(),
-            "Leading electron p_{T} [GeV]",
-            "Subleading electron p_{T} [GeV]",
+            "leading p_{T} [GeV]",
+            "subleading p_{T} [GeV]",
             square=True,
             extraSpace=0.0,
             iPos=0,
-            with_z_axis=True
+            with_z_axis=True,
+            scaleLumi=0.85
         )
         # Set text precision to 2 decimal places
         # Get the underlying "efficiency histogram"
         CMS.cmsObjectDraw(eff2D,"COLZ");
+
+        ROOT.gPad.Update()  # important: force creation of painted histogram
+
+        h = eff2D.GetPaintedHistogram()
+        h.SetMinimum(0.0)
+        h.SetMaximum(1.0)
+
+        ROOT.gPad.Modified()
+        ROOT.gPad.Update()
 
         hist = hist_pass
         for i in range(1, hist.GetNbinsX() + 1):
@@ -467,10 +477,11 @@ def Derive_Trigger_Efficiency_orthogonal_2D(df, selection, xText, Target_DST, fi
                 # Format: value ± max(error_up, error_low)
                 label = ROOT.TLatex()
                 label.SetTextAlign(22)  # center
-                label.SetTextSize(0.02)
+                label.SetTextSize(0.015)
+                err = (err_up + err_low ) / 2
                 if val < 0.01:
                   continue
-                label.DrawLatex(x, y,  f"{val:.2f}") #^{{+{err_up:.2f}}}_{{-{err_low:.2f}}}")
+                label.DrawLatex(x, y,  f"{val:.2f}#pm{err:.2f}")
 
         # CMS style annotation
         label = ROOT.TLatex()
@@ -491,16 +502,16 @@ def Derive_Trigger_Efficiency_orthogonal_2D(df, selection, xText, Target_DST, fi
 #        hdf.GetXaxis().SetTitleSize(0.05)
   
         # Access the histogram drawn on the canvas (or later) and adjust axis titles
-        hdf = CMS.GetcmsCanvasHist(c)  # your CMS helper to get the "frame" histogram
-
+        hdf = c.GetListOfPrimitives().FindObject("hframe")
         # Make axis titles smaller
+        hdf.GetXaxis().SetLabelSize(0.04)
         hdf.GetXaxis().SetTitleSize(0.05)  # smaller than default 0.05
         hdf.GetXaxis().SetTitleOffset(1.3) # adjust offset if needed
+        hdf.GetYaxis().SetLabelSize(0.04)
         hdf.GetYaxis().SetTitleSize(0.05)
         hdf.GetYaxis().SetTitleOffset(1.3)
-
-        c.SetLogx()
-        c.SetLogy()
+#        c.SetLogx()
+#        c.SetLogy()
 
 
         CMS.SaveCanvas(c, os.path.join(plot_dir, f'{Target_DST}_Efficiency{postfix}.png'), close = False)
@@ -558,7 +569,7 @@ if __name__ == "__main__":
         "",
         "PFScouting_DoubleEG",
         fit = args.fit,
-        pt_bins =  np.array([20, 30, 40, 50, 80, 100, 300]),
+        pt_bins =  np.array([0, 30, 50, 80, 100, 200]),
         postfix = "_2D"
     )
 
@@ -587,7 +598,7 @@ if __name__ == "__main__":
     Derive_Trigger_Efficiency(
         df_base,
 #        ((df_base["tag-pt"] < df_base["probe-pt"]) & (df_base["tag-id"] > 1)),
-        ((abs(df_base["tag-eta"]) > 1.57) &  (df_base["tag-id"] > 1) & (abs(df_base["probe-eta"]) < 1.44)),
+        ((abs(df_base["tag-eta"]) > 1.57) &  (df_base["tag-id"] > 3) & (abs(df_base["probe-eta"]) < 1.44)),
         "",
         "PFScouting_SinglePhotonEB",
         fit = args.fit,

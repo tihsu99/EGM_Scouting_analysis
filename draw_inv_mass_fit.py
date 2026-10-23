@@ -83,8 +83,8 @@ def fit_hist(hist, xmin, xmax, fig_name, era, lumi):
     cb = crystal_ball(x, cb_alpha, cb_n, cb_mean, cb_sigma, cb_amp)
     return background + cb
 
-  p0 = [1e6, 0.0,        # Background: amp, slope
-      2e5, 1.5, 3.0, (xmax + xmin) / 2, 1.0]  # Crystal Ball: amp, alpha, n, mean, sigma
+  p0 = [1e5, 0.0,        # Background: amp, slope
+      2e4, 1.5, 3.0, (xmax + xmin) / 2, 1.0]  # Crystal Ball: amp, alpha, n, mean, sigma
 
   # --- Fit with scipy ---
   popt, pcov = curve_fit(model, x_vals, y_vals, p0=p0, sigma=y_errs, absolute_sigma=True, maxfev=10000)
@@ -135,6 +135,7 @@ def fit_hist(hist, xmin, xmax, fig_name, era, lumi):
 
   plt.tight_layout()
   plt.savefig(f"{fig_name}.png")
+  plt.savefig(f"{fig_name}.pdf")
   plt.show()
   plt.close()
 
@@ -181,17 +182,17 @@ def Draw(data, name, plotdir):
       # Pre-binned histogram from NumPy
       # Define bin edges
       edges_lowest = np.arange(0.5, 4, 0.1)
-      edges_low = np.arange(4, 15, 0.5)
-      edges_high = np.arange(15, 200 + 2, 2)
+      edges_low = np.arange(4, 15, 0.1)
+      edges_high = np.arange(15, 200 + 2, 0.1)
       bin_edges = np.concatenate([edges_lowest, edges_low[1:], edges_high[1:]])
-
+      bin_edges = np.arange(2, 140, 0.1)
       # Compute the histogram
       counts, bin_edges = np.histogram(data_point, bins=bin_edges)
       # Compute bin widths
       bin_widths = np.diff(bin_edges)
 
       # Normalize counts by bin width
-      normalized_counts = counts / bin_widths
+      normalized_counts = counts # / bin_widths
 
       hist = ROOT.TH1F("hist", "title", len(bin_edges)-1, bin_edges)
       # Fill TH1 bin contents (skip underflow bin 0)
@@ -207,6 +208,7 @@ def Draw(data, name, plotdir):
       y_binnings = [y_axis.GetBinLowEdge(bin_+1) for bin_ in range(nbinY+1)]
 
 
+
       hist_dict[data_legend].SetDirectory(0)
       fit_results = fit_hist(hist_dict[data_legend], xmin = 2, xmax = 5, fig_name=os.path.join(plotdir, f'{data_legend}_{name}'), era="eraF", lumi = 1)
       mass_width_result[data_legend] = {"mass":  fit_results["cb_mean"], "width": 100 * fit_results["cb_sigma"] / fit_results["cb_mean"]}
@@ -216,7 +218,7 @@ def Draw(data, name, plotdir):
 
    
       if c is None:
-        c = CMS.cmsCanvas('', 2, max(bin_edges), 10, hist_dict[data_legend].GetMaximum()*50, 'M_{e,e} [GeV]', 'events/bin width [GeV]', square = CMS.kRectangular, extraSpace=0.01, iPos=11, yTitOffset=0.8)
+        c = CMS.cmsCanvas('', 2, max(bin_edges), 10, hist_dict[data_legend].GetMaximum()*50, 'M_{e,e} [GeV]', 'Events / 0.1 GeV', square = False, extraSpace=0.01, iPos=11, yTitOffset=0.8)
         legend = CMS.cmsLeg(0.3, 0.8, 0.96, 0.92, textSize=0.033, columns=3)
 
       CMS.cmsDraw(hist_dict[data_legend], 'HIST', mcolor = default_colors[idx], fstyle = 0, lwidth =2 , lcolor = default_colors[idx], fcolor = 0, msize=0)
@@ -234,11 +236,12 @@ def Draw(data, name, plotdir):
 
     c.SetLogy()
 #    c.SetLogx()
-    hdf = CMS.GetcmsCanvasHist(c)
+    hdf = c.GetListOfPrimitives().FindObject("hframe")
     hdf.GetYaxis().SetLabelSize(0.025)
-    hdf.GetYaxis().SetTitleSize(0.047)
+    hdf.GetYaxis().SetTitleSize(0.04)
     hdf.GetXaxis().SetLabelSize(0.025)
-    hdf.GetXaxis().SetTitleSize(0.047)
+    hdf.GetXaxis().SetTitleSize(0.04)
+
 
     CMS.SaveCanvas(c, os.path.join(plotdir, '{}.png'.format(name)), close = False)
     CMS.SaveCanvas(c, os.path.join(plotdir, '{}.pdf'.format(name)))
@@ -280,7 +283,7 @@ def plot_mass_and_width_by_era(mass_width_result, fig_name):
     ax2.set_ylim(80, 92)
  
     hep.cms.text("Preliminary", loc=2, fontsize=12)
-    hep.cms.lumitext(f"2024 eraF (13.6 TeV)")
+    hep.cms.lumitext(f"2024, 27.8 $\\mathrm{{fb}}^{{-1}}$ (13.6 TeV)")
 
     fig.tight_layout()
     plt.grid(True, which='both', axis='x', linestyle='--', alpha=0.5)
@@ -297,8 +300,8 @@ if __name__ == "__main__":
     # Parse command-line arguments
     args = parser.parse_args()
     CMS.SetExtraText("Preliminary")
-    CMS.SetEnergy("2024 eraF, 13.6")
-    CMS.SetLumi("")
+    CMS.SetEnergy(13.6)
+    CMS.SetLumi(lumi=27.8, run="2024")
 
     # Directory containing your .npz files
     directory = args.store_path

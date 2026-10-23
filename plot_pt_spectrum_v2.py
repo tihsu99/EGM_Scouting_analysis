@@ -164,37 +164,87 @@ def rebin_1d(edges, values, variances, factor):
     return edges_rb, values_rb, variances_rb
 
 
+def _flow_offset(axis):
+    """Return index shift caused by underflow bin when using flow=True."""
+    try:
+        return 1 if axis.traits.underflow else 0
+    except Exception:
+        return 0
+
+
+def _has_overflow(axis):
+    try:
+        return bool(axis.traits.overflow)
+    except Exception:
+        return False
+
+
 def project_cutbased_threshold(h3, abseta_min, abseta_max, thr, inclusive=True):
     """
-    h3 axes order (producer):
-      pt, abseta, (cutbased_id or cutbased_noiso_id)
+    h3 axes order:
+      pt, abseta, cutbased_id / cutbased_noiso_id
+
+    This version folds pT overflow into the last visible pT bin.
     """
-    pt_edges = np.asarray(h3.axes["pt"].edges, dtype=float)
-    ab_edges = np.asarray(h3.axes["abseta"].edges, dtype=float)
+    pt_axis = h3.axes["pt"]
+    ab_axis = h3.axes["abseta"]
+    id_axis = h3.axes[2]
+
+    pt_edges = np.asarray(pt_axis.edges, dtype=float)
+    ab_edges = np.asarray(ab_axis.edges, dtype=float)
+
+    npt = len(pt_edges) - 1
 
     a0, a1 = bin_range_from_value_edges(ab_edges, abseta_min, abseta_max)
 
     j0 = int(thr)
     j1 = 5 if inclusive else (j0 + 1)
 
-    vals3 = h3.view(flow=False)  # (npt, nab, nid)
-    spec = vals3[:, a0:a1, j0:j1].sum(axis=(1, 2))
+    # Offsets for flow=True arrays
+    pt_off = _flow_offset(pt_axis)
+    ab_off = _flow_offset(ab_axis)
+    id_off = _flow_offset(id_axis)
+
+    pt0 = pt_off
+    pt1 = pt_off + npt
+
+    a0f = a0 + ab_off
+    a1f = a1 + ab_off
+
+    j0f = j0 + id_off
+    j1f = j1 + id_off
+
+    vals3 = np.asarray(h3.view(flow=True))
+
+    # Visible pT bins
+    spec = vals3[pt0:pt1, a0f:a1f, j0f:j1f].sum(axis=(1, 2))
+
+    # Fold pT overflow into last visible pT bin
+    if _has_overflow(pt_axis):
+        pt_overflow_idx = pt1
+        spec[-1] += vals3[pt_overflow_idx, a0f:a1f, j0f:j1f].sum()
 
     spec_var = None
     try:
-        vars3 = h3.variances(flow=False)
+        vars3 = h3.variances(flow=True)
         if vars3 is not None:
-            spec_var = np.asarray(vars3, dtype=float)[:, a0:a1, j0:j1].sum(axis=(1, 2))
+            vars3 = np.asarray(vars3, dtype=float)
+
+            spec_var = vars3[pt0:pt1, a0f:a1f, j0f:j1f].sum(axis=(1, 2))
+
+            if _has_overflow(pt_axis):
+                pt_overflow_idx = pt1
+                spec_var[-1] += vars3[pt_overflow_idx, a0f:a1f, j0f:j1f].sum()
+
     except Exception:
         spec_var = None
 
     return pt_edges, np.asarray(spec, dtype=float), spec_var
 
-
 def _cms_label(fig, ax):
     # Keep CMS package usage; fall back gracefully
     hep.style.use("CMS")
-    hep.cms.label(ax=ax, data=True, label="Preliminary", lumi=None, rlabel="(13.6 TeV)")
+    hep.cms.label(ax=ax, data=True, label="Preliminary", rlabel = f"2024, 27.8 $\\mathrm{{fb}}^{{-1}}$ (13.6 TeV)")
 def draw_pt_spectrum_cutbased_iso_noiso(
     h_iso, h_noiso,
     region_name, abseta_min, abseta_max,
@@ -220,74 +270,158 @@ def draw_pt_spectrum_cutbased_iso_noiso(
     fig = plt.figure()
     ax = plt.gca()
 
+    ymin = 1e19
+    color = {
+      "No ID": "blue",
+      "Veto": "orange",
+      "Loose": "green",
+      "Medium": "red",
+      "Tight": "purple"
+    }
+   
+
     for wp_name, thr in wp_defs:
-        pt_edges, y_iso, yv_iso = project_cutbased_threshold(
-            h_iso, abseta_min, abseta_max, thr, inclusive=inclusive
-        )
-        _, y_no, yv_no = project_cutbased_threshold(
+        pt_edges, y_no, yv_no = project_cutbased_threshold(
             h_noiso, abseta_min, abseta_max, thr, inclusive=inclusive
         )
 
         if norm_bin_width:
             bw = np.diff(pt_edges)
-            y_iso = y_iso / bw
             y_no = y_no / bw
-            if yv_iso is not None:
-                yv_iso = yv_iso / (bw * bw)
             if yv_no is not None:
                 yv_no = yv_no / (bw * bw)
 
-        pt_edges_rb, y_iso_rb, yv_iso_rb = rebin_1d(pt_edges, y_iso, yv_iso, rebin)
-        _, y_no_rb, yv_no_rb = rebin_1d(pt_edges, y_no, yv_no, rebin)
+        pt_edges_rb, y_no_rb, yv_no_rb = rebin_1d(pt_edges, y_no, yv_no, rebin)
+        c = color[wp_name]
 
-        line_iso = ax.step(
-            pt_edges_rb[:-1], y_iso_rb, where="post",
-            label=f"{wp_name} (iso)" if thr > 0 else f"{wp_name}"
-        )[0]
-        c = line_iso.get_color()
- 
-        if thr > 0:       
-          ax.step(
-            pt_edges_rb[:-1], y_no_rb, where="post",
-            linestyle="--", color=c,
-            label=f"{wp_name} (noiso)"
-          )
+        line_noiso = ax.stairs(
+            y_no_rb,
+            pt_edges_rb,
+            label=f"{wp_name} (noIso)" if thr > 0 else f"{wp_name}",
+            color=c,
+            linestyle="--" if wp_name != "No ID" else "-"
+        )
+
+        #line_noiso = ax.step(
+        #    pt_edges_rb[:-1], y_no_rb, where="post",
+        #    label=f"{wp_name} (noIso)" if thr > 0 else f"{wp_name}",
+        #    color = c,
+        #    linestyle = "--" if not wp_name == "No ID" else "-"
+#        )[0]
+        if xmin is not None:
+           mask = (pt_edges_rb[1:] >= xmin) & (pt_edges_rb[:-1] < 250)
+           ymin_local = min(y_no_rb[mask])
+           if ymin_local < ymin:
+               ymin = ymin_local
+
 
         # Optional error bands (only if variances exist)
-        if yv_iso_rb is not None:
-            err = np.sqrt(np.maximum(yv_iso_rb, 0.0))
-            x = pt_edges_rb[:-1]
-            ax.fill_between(x, y_iso_rb - err, y_iso_rb + err, step="post", alpha=0.15, color=c)
         if yv_no_rb is not None:
             err = np.sqrt(np.maximum(yv_no_rb, 0.0))
             x = pt_edges_rb[:-1]
             ax.fill_between(x, y_no_rb - err, y_no_rb + err, step="post", alpha=0.10, color=c)
 
+
+    for wp_name, thr in wp_defs:
+        if wp_name == "No ID":
+          continue
+        pt_edges, y_iso, yv_iso = project_cutbased_threshold(
+            h_iso, abseta_min, abseta_max, thr, inclusive=inclusive
+        )
+
+
+
+        if norm_bin_width:
+            bw = np.diff(pt_edges)
+            y_iso = y_iso / bw
+            if yv_iso is not None:
+                yv_iso = yv_iso / (bw * bw)
+
+        pt_edges_rb, y_iso_rb, yv_iso_rb = rebin_1d(pt_edges, y_iso, yv_iso, rebin)
+        c = color[wp_name]
+
+        line_iso = ax.stairs(
+          y_iso_rb,
+          pt_edges_rb,
+          label=f"{wp_name} (Iso)" if thr > 0 else f"{wp_name}",
+          color=c
+        )
+
+        #line_iso = ax.step(
+        #    pt_edges_rb[:-1], y_iso_rb, where="post",
+        #    label=f"{wp_name} (Iso)" if thr > 0 else f"{wp_name}",
+        #    color = c
+        #)[0]
+
+
+        if xmin is not None:
+           mask = (pt_edges_rb[1:] >= xmin) & (pt_edges_rb[:-1] < 250)
+           ymin_local = min(y_iso_rb[mask])
+           if ymin_local < ymin:
+               ymin = ymin_local
+
+        # Optional error bands (only if variances exist)
+        if yv_iso_rb is not None:
+            err = np.sqrt(np.maximum(yv_iso_rb, 0.0))
+            x = pt_edges_rb
+            y_low = np.r_[y_no_rb - err, y_no_rb[-1] - err[-1]]
+            y_high = np.r_[y_no_rb + err, y_no_rb[-1] + err[-1]]
+
+            ax.fill_between(x, y_low, y_high, step="post", alpha=0.10, color=c)
+#            x = pt_edges_rb[:-1]
+#            ax.fill_between(x, y_iso_rb - err, y_iso_rb + err, step="post", alpha=0.15, color=c)
+
     if xmin is not None:
       ax.set_xlim(left=xmin)
-
+    ax.set_xlim(0, 200)
     if logx:
         ax.set_xscale("log")
     if logy:
         ax.set_yscale("log")
-        ymin, ymax = ax.get_ylim()
+        if xmin is  None:
+          ymin, ymax = ax.get_ylim()
+        else:
+          _, ymax = ax.get_ylim()
         ax.set_ylim(bottom=ymin, top=ymax * 3)
 
     if tag == "lead" :
         ax.set_xlabel("leading electron $p_{T}$ [GeV]")
     else:
         ax.set_xlabel("subleading electron $p_{T}$ [GeV]")
-    ax.set_ylabel("events/bin width [GeV]" if norm_bin_width else "N")
+    ax.set_ylabel("Events / 1 GeV" if norm_bin_width else "N")
     
     if region_name == "EB":
         plt.text(0.06, 0.9, "Barrel", fontweight="bold", transform=ax.transAxes)
     else:
         plt.text(0.06, 0.9, "Endcap", fontweight="bold", transform=ax.transAxes)
 
-    _cms_label(fig, ax)
 
-    ax.legend(fontsize=12, ncol=2)
-    ax.grid(True, which="both", alpha=0.3)
+    _cms_label(fig, ax)
+    ax.legend(fontsize=12, ncol=2, bbox_to_anchor = (0.95, 0.95), bbox_transform=ax.transAxes, loc="upper right",)
+#    ax.legend(fontsize=12, ncol=2, bbox_to_anchor = (0.5, 0.76), bbox_transform=ax.transAxes, loc="upper right",)
+#    ax.grid(True, which="both", alpha=0.3)
+
+    ax.tick_params(
+     axis='both',
+     which='major',
+     direction='in',
+     top=True,
+     right=True,
+     length=8,
+     width=1.0,
+     labelsize=15,
+    )
+
+    ax.tick_params(
+        axis='both',
+        which='minor',
+        direction='in',
+        top=True,
+        right=True,
+        length=4,
+        width=1.0,
+    )
+
 
     os.makedirs(plot_path, exist_ok=True)
 
@@ -318,7 +452,7 @@ def main():
     parser.add_argument("--energy", default="13.6 TeV")
     parser.add_argument("--lumi", default="")
 
-    parser.add_argument("--out_ext", nargs="+", default=["png"])
+    parser.add_argument("--out_ext", nargs="+", default=["png", "pdf"])
 
     args = parser.parse_args()
 
